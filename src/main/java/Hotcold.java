@@ -51,6 +51,15 @@ public class Hotcold extends ListenerAdapter {
         String id = event.getComponentId();
         if (id.startsWith("hc_bet_")) {
             if (!isBettingOpen) { event.reply("Round ended!").setEphemeral(true).queue(); return; }
+            
+            String userId = event.getUser().getId();
+            for (Bet b : currentBets) {
+                if (b.userId.equals(userId)) {
+                    event.reply("❌ You have already placed a bet! You can only choose **one** option per round.").setEphemeral(true).queue();
+                    return;
+                }
+            }
+
             event.replyModal(Modal.create("m_hc_" + id.split("_")[2], "Place Bet")
                     .addActionRows(ActionRow.of(TextInput.create("amt", "Amount (M)", TextInputStyle.SHORT).build())).build()).queue();
         }
@@ -64,15 +73,14 @@ public class Hotcold extends ListenerAdapter {
                 double amt = Double.parseDouble(event.getValue("amt").getAsString().toLowerCase().replace("m", ""));
                 String userId = event.getUser().getId();
 
-                Main.UserData ud = Main.database.computeIfAbsent(userId, k -> new Main.UserData());
+                Main.UserData ud = Main.getUserData(userId);
                 if (ud.balance < amt) { event.reply("Error: Insufficient Balance.").setEphemeral(true).queue(); return; }
 
                 ud.balance -= amt;
-                ud.wagered += amt;
-                ud.rakeback += (amt * 0.006);
+                Main.saveUserData(userId, ud);
+                Main.updateWagerAndRakeback(userId, amt);
 
                 currentBets.add(new Bet(userId, side, amt));
-                Main.saveData();
 
                 event.reply(String.format("✅ **Bet Placed!** Amount: `%.2fM` | Side: `%s`", amt, side.toUpperCase()))
                         .setEphemeral(true)
@@ -102,10 +110,17 @@ public class Hotcold extends ListenerAdapter {
         if (isProcessing) return;
         isProcessing = true;
 
-        String[] allPossible = {"red", "orange", "yellow", "blue", "assorted", "purple", "rainbow"};
-        String rolled = allPossible[new Random().nextInt(allPossible.length)];
-        String winningSide = determineSide(rolled);
+        String rolled;
+        Random r = new Random();
+        int chance = r.nextInt(100); 
 
+        if (chance < 3) { rolled = "rainbow"; } // 3% Rare Rainbow
+        else {
+            String[] hotColdFlowers = {"red", "orange", "yellow", "blue", "assorted", "purple"};
+            rolled = hotColdFlowers[r.nextInt(hotColdFlowers.length)];
+        }
+
+        String winningSide = determineSide(rolled);
         if (streak.size() >= 5) streak.removeFirst();
         streak.add(FLOWERS.get(rolled));
 
@@ -113,47 +128,38 @@ public class Hotcold extends ListenerAdapter {
         StringBuilder loserList = new StringBuilder("**▸ Losers:**\n");
         boolean anybodyWon = false;
         boolean anybodyLost = false;
-        boolean updateNeeded = false;
 
         for (Bet b : currentBets) {
-            Main.UserData ud = Main.database.get(b.userId);
-            if (ud == null) continue;
-
+            Main.UserData ud = Main.getUserData(b.userId);
             if (b.side.equals(winningSide)) {
-                double mult = winningSide.equals("hot") ? 2.5 : (winningSide.equals("cold") ? 3.0 : 8.0);
+                double mult = winningSide.equals("hot") ? 2.0 : (winningSide.equals("cold") ? 2.1 : 12.0);
                 double winAmt = b.amount * mult;
                 ud.balance += winAmt;
+                Main.saveUserData(b.userId, ud);
                 payoutList.append("<@").append(b.userId).append("> WON **").append(String.format("%.2f", winAmt)).append("M**\n");
-                anybodyWon = true; updateNeeded = true;
+                anybodyWon = true;
             } else {
                 loserList.append("<@").append(b.userId).append("> LOST **").append(String.format("%.2f", b.amount)).append("M**\n");
                 anybodyLost = true;
             }
         }
 
-        if (updateNeeded) Main.saveData();
-
-        Color sidebarColor = anybodyWon ? Color.GREEN : Color.RED;
-
         EmbedBuilder rb = new EmbedBuilder()
                 .setAuthor("Hot Cold Result", null, channel.getGuild().getIconUrl())
-                .setColor(sidebarColor)
+                .setColor(anybodyWon ? Color.GREEN : Color.RED)
                 .setDescription(String.format(
-                        "**Rolled Flower:** %s (%s)\n\n" +
+                        "**Rolled Flower:** %s (%s FLOWERS)\n\n" +
                                 "# %s WINS!",
                         FLOWERS.get(rolled), rolled.toUpperCase(), winningSide.toUpperCase()
                 ));
 
-        if (updateNeeded) rb.addField("", payoutList.toString(), false);
+        if (anybodyWon) rb.addField("", payoutList.toString(), false);
         if (anybodyLost) rb.addField("", loserList.toString(), false);
         if (!anybodyWon && !anybodyLost) rb.addField("", "*No real players in this round.*", false);
 
         rb.setTimestamp(Instant.now());
         if (lastBettingMessage != null) lastBettingMessage.delete().queue(null, t -> {});
-
-        channel.sendMessageEmbeds(rb.build()).queue(s ->
-                Main.scheduler.schedule(() -> startNewRound(channel), 5, TimeUnit.SECONDS)
-        );
+        channel.sendMessageEmbeds(rb.build()).queue(s -> Main.scheduler.schedule(() -> startNewRound(channel), 5, TimeUnit.SECONDS));
     }
 
     private void sendBettingEmbed(TextChannel channel, boolean withTimer) {
@@ -163,9 +169,9 @@ public class Hotcold extends ListenerAdapter {
                 .setColor(new Color(255, 105, 180))
                 .setDescription(String.format(
                         "**▸ Next Game Time:** %s\n" +
-                                "**▸ Payout Multiplier (Hot):** `x2.5`\n" +
-                                "**▸ Payout Multiplier (Cold):** `x3.0`\n" +
-                                "**▸ Payout Multiplier (Rainbow):** `x8.0`\n" +
+                                "**▸ Payout Multiplier (Hot):** `x2.0`\n" +
+                                "**▸ Payout Multiplier (Cold):** `x2.1`\n" +
+                                "**▸ Payout Multiplier (Rainbow):** `x12.0`\n" +
                                 "**▸ Current Streak:** %s\n\n" +
                                 "Click a button bellow to bet on Hot, Cold or Rainbow! Games are automatically launched every 30 seconds",
                         timeDisplay, (streak.isEmpty() ? "None" : String.join(" ", streak))
@@ -173,15 +179,12 @@ public class Hotcold extends ListenerAdapter {
                 .setFooter("Hosted by Staff")
                 .setTimestamp(Instant.now());
 
-        if (withTimer && lastBettingMessage != null) {
-            lastBettingMessage.editMessageEmbeds(eb.build()).queue();
-        } else {
-            channel.sendMessageEmbeds(eb.build()).addActionRow(
+        if (withTimer && lastBettingMessage != null) lastBettingMessage.editMessageEmbeds(eb.build()).queue();
+        else channel.sendMessageEmbeds(eb.build()).addActionRow(
                     Button.danger("hc_bet_hot", "Bet on Hot"),
                     Button.primary("hc_bet_cold", "Bet on Cold"),
                     Button.success("hc_bet_rainbow", "Bet on Rainbow")
             ).queue(msg -> lastBettingMessage = msg);
-        }
     }
 
     private String determineSide(String flower) {
