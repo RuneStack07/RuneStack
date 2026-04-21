@@ -1,1 +1,1 @@
-worker: java -jar target/Gold-Chips-1.0-SNAPSHOT.jar
+worker: java -jar target/RuneStack-1.0-SNAPSHOT.jar
