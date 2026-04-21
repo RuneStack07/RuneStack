@@ -18,7 +18,7 @@ public class Main {
     public static ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(5);
     
     private static final String MONGO_URI = "mongodb+srv://runestack:m209874hu@cluster0.05p8wfv.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0";
-    private static final String BOT_TOKEN = "PASTE_YOUR_TOKEN_HERE";
+    private static final String BOT_TOKEN = "MTQ5NjIzNjk5OTkzNjU3MzU4Mg.Gc0tcE.9HXTXo8urJNPmgnwJPSqZGb_WioNo552RSmTG0";
 
     private static MongoClient mongoClient;
     private static MongoDatabase database;
